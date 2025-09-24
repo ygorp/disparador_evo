@@ -1,0 +1,57 @@
+[2025-06-26 16:33:02] --- INICIANDO NOVA REQUISIÇÃO ---
+[2025-06-26 16:33:02] Log 1: Verificação de login OK.
+[2025-06-26 16:33:02] Log 2: Ação recebida: 'start_maturation'. ID do Cliente: .
+[2025-06-26 16:33:02] Ação 'start_maturation' detectada.
+[2025-06-26 16:33:02] ID da Instância da URL: 1
+[2025-06-26 16:33:02] ID do Cliente da SESSÃO: 1
+[2025-06-26 16:33:02] 
+--- DADOS DA INSTÂNCIA (tabela 'instancias') ---
+[2025-06-26 16:33:02] Array
+(
+    [id] => 1
+    [cliente_id] => 1
+    [plano_maturacao_id] => 1
+    [nome_instancia] => teste
+    [instance_name_api] => teste
+    [numero_telefone] => 552734415852
+    [status] => Conectado
+    [proxy_ativo] => 1
+    [data_criacao] => 2025-06-26 09:20:36
+    [data_fim_maturacao] => 
+)
+
+[2025-06-26 16:33:02] 
+--- DADOS DO CLIENTE (tabela 'clientes') ---
+[2025-06-26 16:33:02] Array
+(
+    [id] => 1
+    [nome] => teste
+    [email] => teste@teste.com
+    [senha] => $2y$10$FPRYmkmrYisjkBhgptc9cOp8zyHbQJiEHgnpOWiSUCl.7RGIQYjge
+    [saldo_creditos_disparo] => 500
+    [saldo_creditos_maturacao] => 900.00
+    [reset_token] => 
+    [reset_token_expires_at] => 
+    [data_cadastro] => 2025-06-26 07:37:40
+)
+
+[2025-06-26 16:33:02] 
+--- DADOS DO PLANO (tabela 'planos') ---
+[2025-06-26 16:33:02] Array
+(
+    [id] => 1
+    [nome] => Fluxo Bronze
+    [descricao] => 
+    [tipo] => maturacao
+    [preco] => 30.00
+    [creditos_disparo] => 
+    [creditos] => 0
+    [duracao_dias] => 3
+    [ativo] => 1
+)
+
+[2025-06-26 16:33:02] 
+--- COMPARAÇÃO FINAL ---
+[2025-06-26 16:33:02] Saldo do cliente (convertido para float): 900
+[2025-06-26 16:33:02] Preço do plano (convertido para float): 30
+[2025-06-26 16:33:02] RESULTADO DA COMPARAÇÃO: Saldo SUFICIENTE. O script deveria prosseguir.
