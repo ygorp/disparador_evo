@@ -1,6 +1,6 @@
 <?php
 /**
- * Script de configuração do ASAAS para PRODUÇÃO
+ * Script de configuração do ASAAS para PRODUÇÃO - VERSÃO CORRIGIDA
  * Execute este arquivo para configurar o ambiente de produção
  * 
  * IMPORTANTE: Execute apenas após ter:
@@ -13,7 +13,7 @@ require_once 'config/config.php';
 require_once 'config/database.php';
 require_once 'config/asaas_config.php';
 
-echo "=== CONFIGURAÇÃO DO ASAAS PARA PRODUÇÃO ===\n\n";
+echo "=== CONFIGURAÇÃO DO ASAAS PARA PRODUÇÃO - VERSÃO CORRIGIDA ===\n\n";
 
 // Verificar se está em produção
 if (ASAAS_ENVIRONMENT !== 'production') {
@@ -23,7 +23,7 @@ if (ASAAS_ENVIRONMENT !== 'production') {
 }
 
 // Verificar se a API Key de produção foi configurada
-if (ASAAS_API_KEY_PRODUCTION === 'SUA_CHAVE_DE_PRODUCAO_AQUI') {
+if (strpos(ASAAS_API_KEY_PRODUCTION, 'SUA_CHAVE') !== false) {
     echo "❌ ERRO: API Key de produção não configurada!\n";
     echo "Configure ASAAS_API_KEY_PRODUCTION em config/asaas_config.php\n\n";
     exit(1);
@@ -70,7 +70,19 @@ echo "🌐 URL do Webhook: $webhookUrl\n";
 
 // Verificar se a URL do webhook é acessível
 echo "🔍 Testando acessibilidade do webhook...\n";
-$webhookTest = @file_get_contents($webhookUrl . '?test=1');
+$context = stream_context_create([
+    "http" => [
+        "method" => "GET",
+        "timeout" => 10,
+        "ignore_errors" => true
+    ],
+    "ssl" => [
+        "verify_peer" => false,
+        "verify_peer_name" => false
+    ]
+]);
+
+$webhookTest = @file_get_contents($webhookUrl . '?test=1', false, $context);
 if ($webhookTest === false) {
     echo "⚠️  AVISO: Não foi possível acessar a URL do webhook.\n";
     echo "Certifique-se de que $webhookUrl está acessível publicamente.\n\n";
@@ -95,24 +107,29 @@ if ($result['success']) {
     }
 }
 
-// Criar novo webhook de produção
+// Criar novo webhook de produção COM OS CAMPOS OBRIGATÓRIOS
 echo "\n4. Criando webhook de produção...\n";
 
 $webhookData = [
     'name' => 'Discador.net Production Webhook',
     'url' => $webhookUrl,
+    'email' => $account['email'], // Campo obrigatório que estava faltando
     'enabled' => true,
-    'sendType' => ASAAS_WEBHOOK_SEND_TYPE, // SEQUENTIALLY ou NON_SEQUENTIALLY
-    'apiVersion' => ASAAS_WEBHOOK_API_VERSION, // Versão da API
+    'interrupted' => false, // Campo para poolInterrupted
+    'sendType' => 'SEQUENTIALLY', // Campo obrigatório - tipo de envio
+    'apiVersion' => ASAAS_WEBHOOK_API_VERSION,
+    'authToken' => ASAAS_WEBHOOK_TOKEN,
     'events' => [
         'PAYMENT_CONFIRMED',
         'PAYMENT_RECEIVED', 
         'PAYMENT_OVERDUE',
         'PAYMENT_DELETED',
         'PAYMENT_CREATED'
-    ],
-    'authToken' => ASAAS_WEBHOOK_TOKEN
+    ]
 ];
+
+echo "📧 Email configurado: " . $account['email'] . "\n";
+echo "🔧 Token de autenticação: " . substr(ASAAS_WEBHOOK_TOKEN, 0, 20) . "...\n";
 
 $createResult = $asaas->makeRequestPublic('POST', '/webhooks', $webhookData);
 
@@ -149,6 +166,13 @@ if ($createResult['success']) {
             'production'
         ]);
         
+        $stmt->execute([
+            'asaas_webhook_email', 
+            $account['email'], 
+            'Email configurado no webhook',
+            $account['email']
+        ]);
+        
         echo "✅ Configurações salvas no banco de dados!\n\n";
         
     } catch (Exception $e) {
@@ -169,16 +193,16 @@ if ($createResult['success']) {
     exit(1);
 }
 
-// 5. Testar webhook
+// 5. Testar webhook criando uma cobrança de teste
 echo "5. Testando webhook...\n";
 echo "🧪 Criando cobrança de teste para validar webhook...\n";
 
 // Criar cliente de teste
 $testCustomer = [
-    'name' => 'Cliente Teste Webhook',
-    'email' => 'teste.webhook@' . parse_url(BASE_URL, PHP_URL_HOST),
+    'name' => 'Cliente Teste Webhook Producao',
+    'email' => 'teste.webhook.prod@' . parse_url(BASE_URL, PHP_URL_HOST),
     'cpfCnpj' => '11144477735', // CPF válido para testes
-    'externalReference' => 'webhook_test_' . time()
+    'externalReference' => 'webhook_test_prod_' . time()
 ];
 
 $customerResult = $asaas->createOrUpdateCustomer($testCustomer);
@@ -186,14 +210,14 @@ $customerResult = $asaas->createOrUpdateCustomer($testCustomer);
 if ($customerResult['success']) {
     $customerId = $customerResult['data']['id'];
     
-    // Criar cobrança de teste
+    // Criar cobrança de teste mínima
     $testPayment = [
         'customer' => $customerId,
         'billingType' => 'PIX',
         'value' => 0.01, // 1 centavo para teste
         'dueDate' => date('Y-m-d', strtotime('+1 day')),
         'description' => 'Teste de webhook - produção',
-        'externalReference' => 'webhook_test_' . time()
+        'externalReference' => 'webhook_test_prod_' . time()
     ];
     
     $paymentResult = $asaas->createPayment($testPayment);
@@ -201,12 +225,33 @@ if ($customerResult['success']) {
     if ($paymentResult['success']) {
         echo "✅ Cobrança de teste criada: " . $paymentResult['data']['id'] . "\n";
         echo "💰 Valor: R$ 0,01 via PIX\n";
-        echo "📅 Vencimento: " . $paymentResult['data']['dueDate'] . "\n\n";
+        echo "📅 Vencimento: " . $paymentResult['data']['dueDate'] . "\n";
+        echo "🔗 Status: " . $paymentResult['data']['status'] . "\n\n";
+        
+        // Salvar ID da cobrança de teste
+        try {
+            $stmt = $pdo->prepare("
+                INSERT INTO configuracoes_sistema (chave, valor, descricao) 
+                VALUES (?, ?, ?) 
+                ON DUPLICATE KEY UPDATE valor = ?, updated_at = NOW()
+            ");
+            $stmt->execute([
+                'asaas_test_payment_id', 
+                $paymentResult['data']['id'], 
+                'ID da cobrança de teste do webhook',
+                $paymentResult['data']['id']
+            ]);
+        } catch (Exception $e) {
+            // Não é crítico se não conseguir salvar
+        }
+        
     } else {
-        echo "⚠️  Aviso: Não foi possível criar cobrança de teste\n\n";
+        echo "⚠️  Aviso: Não foi possível criar cobrança de teste\n";
+        echo "Motivo: " . json_encode($paymentResult['data']) . "\n\n";
     }
 } else {
-    echo "⚠️  Aviso: Não foi possível criar cliente de teste\n\n";
+    echo "⚠️  Aviso: Não foi possível criar cliente de teste\n";
+    echo "Motivo: " . json_encode($customerResult['data']) . "\n\n";
 }
 
 // 6. Verificar configurações de segurança
@@ -229,8 +274,15 @@ if (file_exists($webhookFile)) {
 // Verificar se logs estão habilitados
 if (ini_get('log_errors')) {
     echo "✅ Logs de erro habilitados\n";
+    echo "📝 Arquivo de log: " . (ini_get('error_log') ?: 'default') . "\n";
 } else {
     echo "⚠️  AVISO: Logs de erro desabilitados\n";
+}
+
+// Verificar se o diretório de logs existe
+$logDir = dirname(ini_get('error_log'));
+if (!empty($logDir) && !is_dir($logDir)) {
+    echo "⚠️  AVISO: Diretório de logs não existe: $logDir\n";
 }
 
 echo "\n=== CONFIGURAÇÃO CONCLUÍDA ===\n\n";
@@ -240,17 +292,19 @@ echo "✅ Ambiente: PRODUÇÃO\n";
 echo "✅ API Key: Configurada\n";
 echo "✅ Webhook: " . (isset($createResult) && $createResult['success'] ? "Configurado" : "Com problemas") . "\n";
 echo "✅ HTTPS: Ativo\n";
+echo "✅ Email: " . $account['email'] . "\n";
 echo "✅ Banco: Atualizado\n\n";
 
 echo "🚨 IMPORTANTE - PRÓXIMOS PASSOS:\n";
-echo "1. Faça um teste real de compra com valor baixo (ex: R$ 1,00)\n";
-echo "2. Monitore os logs para verificar se o webhook está funcionando\n";
-echo "3. Verifique se os créditos são adicionados automaticamente após pagamento\n";
-echo "4. Configure monitoramento de pagamentos pendentes\n";
-echo "5. Implemente notificações por email para pagamentos\n\n";
+echo "1. ✅ Webhook configurado com sucesso!\n";
+echo "2. 🧪 Faça um teste real com valor baixo (ex: R$ 1,00)\n";
+echo "3. 📊 Monitore os logs para verificar se o webhook está funcionando\n";
+echo "4. 🔄 Verifique se os créditos são adicionados automaticamente\n";
+echo "5. ⏰ Configure monitoramento de pagamentos pendentes\n\n";
 
 echo "📊 MONITORAMENTO:\n";
-echo "- Logs do sistema: tail -f " . ini_get('error_log') . "\n";
+$errorLog = ini_get('error_log') ?: '/var/log/php_errors.log';
+echo "- Logs do sistema: tail -f $errorLog\n";
 echo "- Webhook logs: SELECT * FROM webhook_logs ORDER BY processed_at DESC LIMIT 10;\n";
 echo "- Transações: SELECT * FROM transacoes WHERE status_pagamento = 'Pendente';\n\n";
 
@@ -258,9 +312,23 @@ if (isset($paymentResult) && $paymentResult['success']) {
     echo "🧪 COBRANÇA DE TESTE CRIADA:\n";
     echo "- ID: " . $paymentResult['data']['id'] . "\n";
     echo "- Status: " . $paymentResult['data']['status'] . "\n";
+    echo "- URL PIX: " . ($paymentResult['data']['invoiceUrl'] ?? 'N/A') . "\n";
     echo "- Use esta cobrança para testar o webhook\n\n";
 }
 
+echo "🎯 TESTE DO WEBHOOK:\n";
+echo "Para testar se o webhook está funcionando:\n";
+echo "1. Acesse: $webhookUrl?test=1\n";
+echo "2. Deve retornar um JSON com status 'webhook_accessible'\n";
+echo "3. Faça um pagamento de teste de R$ 1,00\n";
+echo "4. Verifique os logs PHP em tempo real\n";
+echo "5. Confirme se a transação foi processada automaticamente\n\n";
+
 echo "✨ Sistema ASAAS configurado para produção com sucesso!\n";
 echo "🎉 Seus clientes agora podem fazer pagamentos reais via PIX e Boleto\n\n";
+
+// Limpar cache se necessário
+if (function_exists('opcache_reset')) {
+    opcache_reset();
+}
 ?>
